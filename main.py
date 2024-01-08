@@ -37,7 +37,7 @@ class KMotorShopScraper:
         for i, model_div in enumerate(models_divs):
             models_divs = wait5s.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR,
                                                                             ".index__container > div")))
-            self.scroll_to(self.driver, models_divs[i])
+            self._scroll_to(self.driver, models_divs[i])
             time.sleep(2)
             model_name = models_divs[i].find_element(By.TAG_NAME, 'h3').get_attribute('innerText').strip()
             model_link = models_divs[i].find_element(By.TAG_NAME, 'a').get_attribute('href')
@@ -47,7 +47,7 @@ class KMotorShopScraper:
             for idx, link in enumerate(part_no_links):
                 part_no_links = wait5s.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR,
                                                                                   'table.searchtable a')))
-                self.scroll_to(self.driver, part_no_links[idx])
+                self._scroll_to(self.driver, part_no_links[idx])
                 time.sleep(2)
                 part_no = part_no_links[idx].get_attribute('innerText').strip()
                 self.driver.get(part_no_links[idx].get_attribute('href'))
@@ -64,7 +64,7 @@ class KMotorShopScraper:
         self._concat_get_csv(dataframes)
         time.sleep(2)
 
-    def scroll_to(self, driver: WebDriver, element: WebElement):
+    def _scroll_to(self, driver: WebDriver, element: WebElement):
         """Scroll to the given WebElement.
 
         :param driver: WebDriver instance

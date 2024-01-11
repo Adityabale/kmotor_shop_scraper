@@ -2,22 +2,23 @@ import os
 import time
 import requests
 import warnings
+import logging
 import pandas as pd
 
-from pathlib import Path
 from typing import Optional
 from datetime import datetime
-from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.common import exceptions
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.remote.webdriver import WebDriver, WebElement
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.options import Options as ChromeOptions
+# from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.common.action_chains import ActionChains
 
+logging.basicConfig(filename='model_parts.log', level=logging.INFO,
+                    format='%(asctime)s:%(levelname)s:%(message)s')
 
 class KMotorShopScraper:
     main_page = 'https://www.kmotorshop.com/en/device/manu-car-list'
@@ -26,61 +27,73 @@ class KMotorShopScraper:
         """ Initialize the webdriver"""
         self.driver: Optional[WebDriver] = None
         self.session = None
+        self.model_count = 0
 
     def get_models_data(self, headers: dict):
         """Gets all the spare parts list for models from the main page."""
-        actions = ActionChains(self.driver)
-        retry = int()
-        model_count = int()
+        # actions = ActionChains(self.driver)
         wait5s = WebDriverWait(self.driver, 5)
         dataframes = list()
         self.driver.get(self.main_page)
         self._click_accept_cookies()
-        models_divs = wait5s.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, ".index__container > div")))
-        while model_count < len(models_divs):
+        models_divs = wait5s.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR,
+                                                                        ".index__container > div")))[self.model_count:]
+        for i, model_div in enumerate(models_divs):
             try:
-                for i, model_div in enumerate(models_divs):
-                    models_divs = wait5s.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR,
-                                                                                    ".index__container > div")))
-                    self._scroll_to(self.driver, models_divs[i])
-                    time.sleep(2)
-                    model_name = models_divs[i].find_element(By.TAG_NAME, 'h3').get_attribute('innerText').strip()
-                    model_link = models_divs[i].find_element(By.TAG_NAME, 'a').get_attribute('href')
-                    self.driver.get(model_link)
-                    time.sleep(2)
+                models_divs = wait5s.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR,
+                                                                                ".index__container > div")))[self.model_count:]
+                self._scroll_to(self.driver, models_divs[i])
+                time.sleep(2)
+                model_name = models_divs[i].find_element(By.TAG_NAME, 'h3').get_attribute('innerText').strip()
+                model_link = models_divs[i].find_element(By.TAG_NAME, 'a').get_attribute('href')
+                self.driver.get(model_link)
+                time.sleep(2)
+                try:
                     part_no_links = wait5s.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, 'table.searchtable a')))
-                    for idx, link in enumerate(part_no_links):
-                        part_no_links = wait5s.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR,
-                                                                                          'table.searchtable a')))
-                        self._scroll_to(self.driver, part_no_links[idx])
-                        part_no = part_no_links[idx].get_attribute('innerText').strip()
-                        # self.driver.get(part_no_links[idx].get_attribute('href'))
-                        # time.sleep(2)
-                        response = requests.get(part_no_links[idx].get_attribute('href'), headers=headers)
-                        time.sleep(2)
-                        html = response.text
-                        # soup = BeautifulSoup(html, 'html5lib')
-                        try:
-                            tables = pd.read_html(html)
-                            df = pd.DataFrame(tables[0])
-                            df['Model'] = model_name
-                            dataframes.append(df)
-                            # print(df)
-                            print(f"Done: {model_name}\t {part_no}")
-                            # self.driver.back()
-                            # time.sleep(2)
-                            model_count += 1
-                        except ValueError: #if no table
-                            pass
+                except exceptions.TimeoutException:
                     self.driver.back()
                     time.sleep(2)
-            except requests.exceptions.ConnectionError:
-                retry += 1
-                time.sleep(60*retry)
-                continue
+                    continue
+                for idx, link in enumerate(part_no_links):
+                    part_no_links = wait5s.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR,
+                                                                                      'table.searchtable a')))
+                    self._scroll_to(self.driver, part_no_links[idx])
+                    part_no = part_no_links[idx].get_attribute('innerText').strip()
+                    retry = int()
+                    while retry < 4:
+                        try:
+                            response = requests.get(part_no_links[idx].get_attribute('href'), headers=headers)
+                            time.sleep(2)
+                            html = response.text
+                            # soup = BeautifulSoup(html, 'html5lib')
+                            try:
+                                tables = pd.read_html(html)
+                                df = pd.DataFrame(tables[0])
+                                df['Model'] = model_name
+                                dataframes.append(df)
+                                # print(df)
+                                print(f"Done: {model_name},\t {part_no},\t model no:{self.model_count + 1}")
+                                logging.info(f"{model_name},\t {part_no},\t model no:{self.model_count + 1}")
+                                break
+                            except ValueError:  # if no table
+                                break
+                        except requests.exceptions.ConnectionError:
+                            retry += 1
+                            time.sleep(60 * retry)
+                            continue
 
-        self._concat_get_csv(dataframes)
-        time.sleep(2)
+                self.driver.back()
+                self.model_count += 1
+                time.sleep(2)
+
+            except Exception:
+                self._concat_get_csv(dataframes)
+                print(f"Models complete: {self.model_count}")
+                break
+
+        else:
+            self._concat_get_csv(dataframes)
+            print(f"Total models complete: {self.model_count}")
 
     def _scroll_to(self, driver: WebDriver, element: WebElement):
         """Scroll to the given WebElement.
@@ -93,7 +106,7 @@ class KMotorShopScraper:
     def _concat_get_csv(self, dataframes):
         """Merge all the dataframes to a single df. Save the complete file in csv format"""
         data = pd.concat(dataframes, ignore_index=True)
-        data.to_csv(f'scraped-data/{datetime.strftime(datetime.now(), "%Y-%m-%d")}.csv')
+        data.to_csv(f'scraped-data/{datetime.strftime(datetime.now(), "%Y-%m-%d")}_{len(dataframes)}.csv', index=False)
 
     def _click_accept_cookies(self):
         """Clicks on the accept button for the cookies popup that appears."""
